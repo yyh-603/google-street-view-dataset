@@ -4,18 +4,24 @@ import os
 import pandas as pd
 import random
 import json
-import time
-from PIL import Image
-from io import BytesIO
-import matplotlib.pyplot as plt
 
 dotenv.load_dotenv()
+
+'''
+Constants meaning:
+- GOOGLE_MAP_API_KEY: Google Map API key
+- URL: Google Street View API URL
+- START_ID: The starting ID of the picture
+- CITY_MAX: The maximum number of pictures to be collected in each city
+- CITY_LABEL: The list of cities to be collected (Default: 19 cities in Taiwan)
+- CITY_RANGE: The range of latitude and longitude of each city
+'''
 
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAP_API_KEY")
 URL = "https://maps.googleapis.com/maps/api/streetview"
 
+START_ID = 0
 CITY_MAX = 50
-# CITY_LABEL = ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣"]
 CITY_LABEL = ["Taipei City", "New Taipei City", "Taoyuan City", "Taichung City", "Tainan City", "Kaohsiung City", "Keelung City", "Hsinchu City", "Chiayi City", "Hsinchu County", "Miaoli County", "Changhua County", "Nantou County", "Yunlin County", "Chiayi County", "Pingtung County", "Yilan County", "Hualien County", "Taitung County"]
 CITY_RANGE = {
     "Taipei City": (24.94, 121.44, 25.22, 121.67),
@@ -38,10 +44,19 @@ CITY_RANGE = {
     "Yunlin County": (23.50, 120.11, 23.87, 120.74),
     "Nantou County": (23.43, 120.61, 24.26, 121.36),
 }
-START_ID = 250
 
-def get_picture(lat, lon, heading=0, pitch=0, fov=90):
-    heading = random.randint(0, 359)
+'''
+get_picture: Get a picture from Google Street View API
+- lat: Latitude of the location
+- lon: Longitude of the location
+- heading: The compass heading of the camera(default is random)
+- pitch: The up or down angle of the camera(default is 0)
+- fov: The horizontal field of view of the image(default is 90)
+- return: The content of the picture
+'''
+def get_picture(lat, lon, heading=-1, pitch=0, fov=90):
+    if heading == -1:
+        heading = random.randint(0, 359)
     url = f"{URL}?size=640x640&location={lat},{lon}&heading={heading}&pitch={pitch}&fov={fov}&key={GOOGLE_MAP_API_KEY}"
     response = requests.get(url)
     if response.status_code == 200:
@@ -49,6 +64,12 @@ def get_picture(lat, lon, heading=0, pitch=0, fov=90):
     else:
         return None
     
+'''
+check_picture_exist: Check if the picture exists in the location
+- lat: Latitude of the location
+- lon: Longitude of the location
+- return: True if the picture exists, False if the picture does not exist, None if the request fails
+'''
 def check_picture_exist(lat, lon):
     url = f"{URL}/metadata?location={lat},{lon}&key={GOOGLE_MAP_API_KEY}"
     response = requests.get(url)
@@ -62,25 +83,46 @@ def check_picture_exist(lat, lon):
         print(response.content)
         return None
 
+'''
+get_address: Get the address of the location
+- lat: Latitude of the location
+- lon: Longitude of the location
+- return: a tuple of city and address (city, address)
+'''
 def get_address(lat, lon):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lon}&key={GOOGLE_MAP_API_KEY}"
     response = requests.get(url)
+
     if response.status_code == 200:
         data = json.loads(response.content.decode())
         city = None
         address = None
+
         for item in data['results']:
+            # administrative_area_level_1 is the city in Taiwan
             if 'administrative_area_level_1' in item['types']:
                 city = item['formatted_address']
                 break
+
+            # route is the address
             if 'route' in item['types']:
                 address = item['formatted_address']
+        
         if city == None:
             return None, None
+        
+        # get the city name (original format: "Taipei City, Taiwan")
         city = city.split(',')[0]
+
         return city, address
     else:
         return None, None
+    
+'''
+get_all_filenames: Get all filenames in the directory
+- directory: The directory path
+- return: A set of filenames
+'''
     
 def get_all_filenames(directory):
     filenames = set()
@@ -90,20 +132,23 @@ def get_all_filenames(directory):
     return filenames
 
 if __name__ == '__main__':
+
+    # read the CSV file
     df = pd.read_csv('./output.csv')
     new_df = pd.DataFrame(columns=["lat", "lon", "city", "address", "picture_name"])
 
-
+    # dataset path
     directory_path = './data/'
     all_filenames = get_all_filenames(directory_path)
 
     print("Total files: ", len(all_filenames))
-    count = 0
     for index, row in df.iterrows():
         try:
             lat, lon = row['lat'], row['lon']
             city, address = row["city"], row["address"]
             picture_name = row["picture_name"]
+            
+            # check if the picture exists
             if picture_name in all_filenames:
                 new_df = pd.concat([new_df, pd.DataFrame.from_records([{
                     "lat": lat,
@@ -132,6 +177,7 @@ if __name__ == '__main__':
 
             picture = get_picture(lat, lon)
 
+            # write the picture to a temporary file to check
             with open('./tmp.jpg', 'wb') as f:
                 f.write(picture)
             
@@ -143,14 +189,15 @@ if __name__ == '__main__':
                 "picture_name": picture_name
             }])], ignore_index=True)
             
+            # ask the user if the picture is allowed to keep
             op = input('have this picture? (y/n): ')
             if op == 'n':
                 continue
             
+            # save the picture
             with open('./data/' + picture_name, 'wb') as f:
                 f.write(picture)
+        
         except Exception as e:
             print(e)
             continue
-        
-    print("Need to download: ", count)
